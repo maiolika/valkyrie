@@ -1,0 +1,12 @@
+shared/
+build/
+dist/
+node_modules/
+.env
+.DS_Store
+.vscode/
+.idea/
+*.log
+*.tmp
+*.bak
+*.swp
