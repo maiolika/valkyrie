@@ -6,9 +6,14 @@ all: clean test check lint build-example run-example
 	@echo "All done"
 
 build-example:
-	@echo "Building example..."
+	@echo "Building mycli example..."
 	@mkdir -p $(BUILD_DIR)
 	@odin build examples/mycli -out:$(BUILD_DIR)/mycli
+
+build-devtool:
+	@echo "Building devtool..."
+	@mkdir -p $(BUILD_DIR)
+	@odin build examples/devtool -out:$(BUILD_DIR)/devtool
 
 run-example: build-example
 	@echo "Running example..."
