@@ -56,14 +56,20 @@ Command_Fn :: #type proc(ctx: ^Context) -> (ok: bool)
 
 // Command definition
 Command :: struct {
-	name:        string,
-	description: string,
-	usage:       string,
-	flags:       [dynamic]Flag,
-	subcommands: [dynamic]^Command,
-	handler:     Command_Fn,
-	parent:      ^Command,
-	allocator:   mem.Allocator,
+	name:                string,
+	description:         string,
+	usage:               string,
+	aliases:             [dynamic]string,
+	flags:               [dynamic]Flag,
+	persistent_flags:    [dynamic]Flag,
+	subcommands:         [dynamic]^Command,
+	handler:             Command_Fn,
+	pre_run:             Command_Fn,
+	post_run:            Command_Fn,
+	persistent_pre_run:  Command_Fn,
+	persistent_post_run: Command_Fn,
+	parent:              ^Command,
+	allocator:           mem.Allocator,
 }
 
 // Application structure
@@ -110,7 +116,9 @@ command_create :: proc(
 	cmd.description = description
 	cmd.handler = handler
 	cmd.allocator = allocator
+	cmd.aliases = make([dynamic]string, allocator)
 	cmd.flags = make([dynamic]Flag, allocator)
+	cmd.persistent_flags = make([dynamic]Flag, allocator)
 	cmd.subcommands = make([dynamic]^Command, allocator)
 	return cmd
 }
@@ -124,7 +132,9 @@ command_destroy :: proc(cmd: ^Command) {
 		command_destroy(subcmd)
 	}
 
+	delete(cmd.aliases)
 	delete(cmd.flags)
+	delete(cmd.persistent_flags)
 	delete(cmd.subcommands)
 	free(cmd, cmd.allocator)
 }
@@ -134,15 +144,45 @@ command_add_flag :: proc(cmd: ^Command, flag: Flag) {
 	append(&cmd.flags, flag)
 }
 
+// Add a persistent flag to a command (inherited by subcommands)
+command_add_persistent_flag :: proc(cmd: ^Command, flag: Flag) {
+	append(&cmd.persistent_flags, flag)
+}
+
 // Add a subcommand
 command_add_subcommand :: proc(parent: ^Command, child: ^Command) {
 	child.parent = parent
 	append(&parent.subcommands, child)
 }
 
+// Add an alias for a command
+command_add_alias :: proc(cmd: ^Command, alias: string) {
+	append(&cmd.aliases, alias)
+}
+
 // Set command handler
 command_set_handler :: proc(cmd: ^Command, handler: Command_Fn) {
 	cmd.handler = handler
+}
+
+// Set pre-run hook (runs before handler)
+command_set_pre_run :: proc(cmd: ^Command, handler: Command_Fn) {
+	cmd.pre_run = handler
+}
+
+// Set post-run hook (runs after handler)
+command_set_post_run :: proc(cmd: ^Command, handler: Command_Fn) {
+	cmd.post_run = handler
+}
+
+// Set persistent pre-run hook (inherited by subcommands, runs before pre_run)
+command_set_persistent_pre_run :: proc(cmd: ^Command, handler: Command_Fn) {
+	cmd.persistent_pre_run = handler
+}
+
+// Set persistent post-run hook (inherited by subcommands, runs after post_run)
+command_set_persistent_post_run :: proc(cmd: ^Command, handler: Command_Fn) {
+	cmd.persistent_post_run = handler
 }
 
 // Helper to create boolean flag
@@ -216,6 +256,17 @@ flag_float :: proc(
 	}
 }
 
+// Collect persistent flags from parent chain (including current command)
+collect_persistent_flags :: proc(cmd: ^Command, flags: ^[dynamic]Flag) {
+	if cmd == nil do return
+	// First collect from parent (so parent flags come first)
+	collect_persistent_flags(cmd.parent, flags)
+	// Then add this command's persistent flags
+	for flag in cmd.persistent_flags {
+		append(flags, flag)
+	}
+}
+
 // Parse command line arguments
 parse_args :: proc(
 	cmd: ^Command,
@@ -248,7 +299,7 @@ parse_args :: proc(
 	positional_args := make([dynamic]string, allocator)
 	defer delete(positional_args)
 
-	// First, set default values
+	// First, set default values for command's own flags
 	for flag in cmd.flags {
 		switch flag.type {
 		case .Bool:
@@ -260,6 +311,33 @@ parse_args :: proc(
 		case .Float:
 			ctx.flags[flag.name] = flag.default_val.(f64)
 		}
+	}
+
+	// Collect and set defaults for persistent flags from parent chain
+	all_persistent_flags := make([dynamic]Flag, allocator)
+	defer delete(all_persistent_flags)
+	collect_persistent_flags(cmd, &all_persistent_flags)
+	for flag in all_persistent_flags {
+		switch flag.type {
+		case .Bool:
+			ctx.flags[flag.name] = flag.default_val.(bool)
+		case .String:
+			ctx.flags[flag.name] = flag.default_val.(string)
+		case .Int:
+			ctx.flags[flag.name] = flag.default_val.(int)
+		case .Float:
+			ctx.flags[flag.name] = flag.default_val.(f64)
+		}
+	}
+
+	// Build combined flag list for parsing (command flags + persistent flags)
+	all_flags := make([dynamic]Flag, allocator)
+	defer delete(all_flags)
+	for flag in cmd.flags {
+		append(&all_flags, flag)
+	}
+	for flag in all_persistent_flags {
+		append(&all_flags, flag)
 	}
 
 	// Parse arguments
@@ -288,9 +366,9 @@ parse_args :: proc(
 				}
 			}
 
-			// Find the flag
+			// Find the flag in combined list
 			flag_found := false
-			for flag in cmd.flags {
+			for flag in all_flags {
 				if flag.name == flag_name {
 					flag_found = true
 
@@ -370,7 +448,7 @@ parse_args :: proc(
 			}
 
 			flag_found := false
-			for flag in cmd.flags {
+			for flag in all_flags {
 				if flag.short == short_name {
 					flag_found = true
 
@@ -432,15 +510,25 @@ parse_args :: proc(
 				return ctx, cmd_to_run, false
 			}
 		} else {
-			// Check if it's a subcommand
+			// Check if it's a subcommand (by name or alias)
 			subcommand_found := false
 			for subcmd in cmd.subcommands {
+				// Check command name
 				if subcmd.name == arg {
 					subcommand_found = true
 					remaining_args := args[i + 1:]
 					delete(ctx.flags)
 					// Note: ctx.args is not assigned yet, so no need to delete
 					return parse_args(subcmd, remaining_args, allocator)
+				}
+				// Check aliases
+				for alias in subcmd.aliases {
+					if alias == arg {
+						subcommand_found = true
+						remaining_args := args[i + 1:]
+						delete(ctx.flags)
+						return parse_args(subcmd, remaining_args, allocator)
+					}
 				}
 			}
 
@@ -465,6 +553,16 @@ parse_args :: proc(
 		}
 	}
 
+	// Check required persistent flags were explicitly provided
+	for flag in all_persistent_flags {
+		if flag.required {
+			if flag.name not_in provided_flags {
+				fmt.eprintfln("Error: required persistent flag --%s not provided", flag.name)
+				return ctx, cmd_to_run, false
+			}
+		}
+	}
+
 	ok = true
 	return ctx, cmd_to_run, true
 }
@@ -475,6 +573,18 @@ print_help :: proc(cmd: ^Command) {
 		fmt.printfln("%s - %s", cmd.name, cmd.description)
 	} else {
 		fmt.printfln("%s", cmd.description)
+	}
+
+	// Show aliases if present
+	if len(cmd.aliases) > 0 {
+		fmt.printf("Aliases: ")
+		for i := 0; i < len(cmd.aliases); i += 1 {
+			if i > 0 {
+				fmt.printf(", ")
+			}
+			fmt.printf("%s", cmd.aliases[i])
+		}
+		fmt.println()
 	}
 
 	fmt.println()
@@ -496,10 +606,26 @@ print_help :: proc(cmd: ^Command) {
 		}
 	}
 
+	// Show persistent flags (inherited from parent chain)
+	all_persistent := make([dynamic]Flag, context.temp_allocator)
+	collect_persistent_flags(cmd, &all_persistent)
+	if len(all_persistent) > 0 {
+		fmt.println("\nPersistent Flags:")
+		for flag in all_persistent {
+			short_str := flag.short != "" ? fmt.tprintf("-%s, ", flag.short) : "    "
+			required_str := flag.required ? " (required)" : ""
+			fmt.printfln("  %s--%-15s %s%s", short_str, flag.name, flag.description, required_str)
+		}
+	}
+
 	if len(cmd.subcommands) > 0 {
 		fmt.println("\nSubcommands:")
 		for subcmd in cmd.subcommands {
-			fmt.printfln("  %-15s %s", subcmd.name, subcmd.description)
+			alias_str := ""
+			if len(subcmd.aliases) > 0 {
+				alias_str = fmt.tprintf(" (aliases: %s)", subcmd.aliases[0])
+			}
+			fmt.printfln("  %-15s %s%s", subcmd.name, subcmd.description, alias_str)
 		}
 	}
 }
@@ -538,8 +664,69 @@ app_run :: proc(app: ^App, args: []string = nil) -> int {
 		return 1
 	}
 
+	// Execute persistent pre-run hooks (from root to leaf)
+	if !execute_persistent_pre_run(cmd, &ctx) {
+		return 1
+	}
+
+	// Execute pre-run hook
+	if cmd.pre_run != nil {
+		if !cmd.pre_run(&ctx) {
+			return 1
+		}
+	}
+
+	// Execute main handler
 	ok = cmd.handler(&ctx)
-	return ok ? 0 : 1
+	if !ok {
+		return 1
+	}
+
+	// Execute post-run hook
+	if cmd.post_run != nil {
+		if !cmd.post_run(&ctx) {
+			return 1
+		}
+	}
+
+	// Execute persistent post-run hooks (from leaf to root)
+	if !execute_persistent_post_run(cmd, &ctx) {
+		return 1
+	}
+
+	return 0
+}
+
+// Execute persistent pre-run hooks from root to leaf
+execute_persistent_pre_run :: proc(cmd: ^Command, ctx: ^Context) -> bool {
+	if cmd == nil do return true
+	// First execute parent's persistent pre-run
+	if !execute_persistent_pre_run(cmd.parent, ctx) {
+		return false
+	}
+	// Then execute this command's persistent pre-run
+	if cmd.persistent_pre_run != nil {
+		if !cmd.persistent_pre_run(ctx) {
+			return false
+		}
+	}
+	return true
+}
+
+// Execute persistent post-run hooks from leaf to root
+execute_persistent_post_run :: proc(cmd: ^Command, ctx: ^Context) -> bool {
+	if cmd == nil do return true
+	// First execute this command's persistent post-run
+	if cmd.persistent_post_run != nil {
+		if !cmd.persistent_post_run(ctx) {
+			return false
+		}
+	}
+	// Then execute parent's persistent post-run
+	if !execute_persistent_post_run(cmd.parent, ctx) {
+		return false
+	}
+	return true
 }
 
 // Context helper methods

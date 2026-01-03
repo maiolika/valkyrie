@@ -153,6 +153,24 @@ server_start_handler :: proc(ctx: ^vk.Context) -> bool {
 	return true
 }
 
+// Persistent pre-run hook - runs before every command
+persistent_pre_run :: proc(ctx: ^vk.Context) -> bool {
+	verbose := vk.get_flag_bool(ctx, "verbose")
+	if verbose {
+		fmt.println("[DEBUG] Starting command execution...")
+	}
+	return true
+}
+
+// Persistent post-run hook - runs after every command
+persistent_post_run :: proc(ctx: ^vk.Context) -> bool {
+	verbose := vk.get_flag_bool(ctx, "verbose")
+	if verbose {
+		fmt.println("[DEBUG] Command execution completed.")
+	}
+	return true
+}
+
 main :: proc() {
 	// Create the app
 	app := vk.app_create(
@@ -161,6 +179,13 @@ main :: proc() {
 		"An example vk application built with Valkyrie",
 		context.temp_allocator,
 	)
+
+	// Add persistent flags to root command (inherited by all subcommands)
+	vk.command_add_persistent_flag(app.root, vk.flag_bool("verbose", "v", "Enable verbose output"))
+
+	// Set persistent hooks on root (run for all commands)
+	vk.command_set_persistent_pre_run(app.root, persistent_pre_run)
+	vk.command_set_persistent_post_run(app.root, persistent_post_run)
 
 	// Create greet command
 	greet_cmd := vk.command_create("greet", "Greet someone by name")
@@ -187,15 +212,16 @@ main :: proc() {
 
 	vk.command_add_subcommand(app.root, math_cmd)
 
-	// Create list command
+	// Create list command with alias
 	list_cmd := vk.command_create("list", "List items")
-	vk.command_add_flag(list_cmd, vk.flag_bool("verbose", "v", "Show detailed information"))
+	vk.command_add_alias(list_cmd, "ls") // Add 'ls' as an alias
 	vk.command_add_flag(list_cmd, vk.flag_string("filter", "f", "Filter items by substring"))
 	vk.command_set_handler(list_cmd, list_handler)
 	vk.command_add_subcommand(app.root, list_cmd)
 
-	// Create server command with subcommands
+	// Create server command with alias and subcommands
 	server_cmd := vk.command_create("server", "Server management commands")
+	vk.command_add_alias(server_cmd, "srv") // Add 'srv' as an alias
 
 	server_info_cmd := vk.command_create("info", "Show server information")
 	vk.command_set_handler(server_info_cmd, server_info_handler)

@@ -163,6 +163,65 @@ Usage:
 ./myapp server stop
 ```
 
+### Persistent Flags
+
+Persistent flags are inherited by all subcommands:
+
+```odin
+// Add a persistent flag to root (available to all commands)
+vk.command_add_persistent_flag(app.root, vk.flag_bool("verbose", "v", "Enable verbose output"))
+
+// Now --verbose works on any subcommand
+// ./myapp --verbose greet
+// ./myapp greet --verbose  (same effect)
+```
+
+### Command Aliases
+
+Add alternative names for commands:
+
+```odin
+// Create command with alias
+list_cmd := vk.command_create("list", "List items")
+vk.command_add_alias(list_cmd, "ls")      // 'ls' now works like 'list'
+
+server_cmd := vk.command_create("server", "Server commands")
+vk.command_add_alias(server_cmd, "srv")   // 'srv' now works like 'server'
+```
+
+### Pre/Post Run Hooks
+
+Execute code before and after command handlers:
+
+```odin
+// Simple pre-run hook
+setup_hook :: proc(ctx: ^vk.Context) -> bool {
+    fmt.println("Setting up...")
+    return true
+}
+
+// Simple post-run hook
+cleanup_hook :: proc(ctx: ^vk.Context) -> bool {
+    fmt.println("Cleaning up...")
+    return true
+}
+
+// Set hooks on a command
+vk.command_set_pre_run(cmd, setup_hook)
+vk.command_set_post_run(cmd, cleanup_hook)
+
+// Persistent hooks (inherited by subcommands)
+vk.command_set_persistent_pre_run(app.root, global_setup)
+vk.command_set_persistent_post_run(app.root, global_cleanup)
+```
+
+Hook execution order:
+1. Persistent pre-run (root → leaf)
+2. Pre-run
+3. Handler
+4. Post-run
+5. Persistent post-run (leaf → root)
+
 ## Examples
 
 A complete example application is provided in `examples/mycli/`. Build and run it:
