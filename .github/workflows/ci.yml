@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Odin
+        uses: laytan/setup-odin@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Run Tests
+        run: odin test valkyrie -out:build/test
+      
+      - name: Check (Static Analysis)
+        run: odin build valkyrie -build-mode:obj -out:build/valkyrie.o
+      
+      - name: Lint (Vet)
+        run: |
+          odin build valkyrie -build-mode:obj -vet -out:build/valkyrie_lint.o
+          odin build examples/mycli -vet -out:build/mycli_lint
+          odin build examples/devtool -vet -out:build/devtool_lint
+      
+      - name: Build Examples
+        run: |
+          odin build examples/mycli -out:build/mycli
+          odin build examples/devtool -out:build/devtool
