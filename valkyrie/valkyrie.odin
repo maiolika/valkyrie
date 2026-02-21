@@ -54,6 +54,9 @@ Context :: struct {
 // Command handler function type
 Command_Fn :: #type proc(ctx: ^Context) -> (ok: bool)
 
+// Command handler function type
+Help_Fn :: #type proc(cmd: ^Command)
+
 // Command definition
 Command :: struct {
 	name:                string,
@@ -68,6 +71,7 @@ Command :: struct {
 	post_run:            Command_Fn,
 	persistent_pre_run:  Command_Fn,
 	persistent_post_run: Command_Fn,
+	help_fn:             Help_Fn,
 	parent:              ^Command,
 	allocator:           mem.Allocator,
 }
@@ -163,6 +167,11 @@ command_add_alias :: proc(cmd: ^Command, alias: string) {
 // Set command handler
 command_set_handler :: proc(cmd: ^Command, handler: Command_Fn) {
 	cmd.handler = handler
+}
+
+// Set custom help handler
+command_set_help :: proc(cmd: ^Command, help: Help_Fn) {
+    cmd.help_fn = help
 }
 
 // Set pre-run hook (runs before handler)
@@ -567,8 +576,17 @@ parse_args :: proc(
 	return ctx, cmd_to_run, true
 }
 
-// Print help information
+// Dispatch help: calls custom function or default
 print_help :: proc(cmd: ^Command) {
+    if cmd.help_fn != nil {
+        cmd.help_fn(cmd)
+    } else {
+        print_help_default(cmd)
+    }
+}
+
+// Default help handler (renamed from original print_help)
+print_help_default :: proc(cmd: ^Command) {
 	if cmd.name != "" {
 		fmt.printfln("%s - %s", cmd.name, cmd.description)
 	} else {
