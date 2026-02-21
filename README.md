@@ -12,6 +12,7 @@ A clean, type-safe CLI framework for Odin that makes building command-line appli
 - **Command aliases** - Alternative names for commands
 - **Pre/Post run hooks** - Execute code before and after commands
 - **Automatic help generation** - Help text generated from command metadata
+- **Custom help handlers** - Custom help handlers for commands
 - **Short and long flags** - Both `-f` and `--flag` syntax supported
 - **Required and optional flags** - Enforce required parameters
 - **Default values** - Sensible defaults for all flag types
