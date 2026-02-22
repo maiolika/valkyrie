@@ -1,6 +1,10 @@
 # Valkyrie
 
-A clean, type-safe CLI framework for Odin that makes building command-line applications simple and intuitive. Inspired by [spf13/cobra](https://github.com/spf13/cobra) for Go.
+Fork of a clean, type-safe CLI framework for Odin that makes building command-line applications simple and intuitive. Inspired by [spf13/cobra](https://github.com/spf13/cobra) for Go.
+
+Added:
+- Custom help handlers for commands
+- Commands now respect parent's hooks
 
 ![Demo](demo.gif)
 
@@ -10,8 +14,9 @@ A clean, type-safe CLI framework for Odin that makes building command-line appli
 - **Nested subcommands** - Build complex CLI hierarchies
 - **Persistent flags** - Flags inherited by all subcommands
 - **Command aliases** - Alternative names for commands
-- **Pre/Post run hooks** - Execute code before and after commands
+- **Pre/Post run hooks** - Execute code before and after commands (with respect of parent's hooks)
 - **Automatic help generation** - Help text generated from command metadata
+- **Custom help handlers** - Custom help handlers for commands
 - **Short and long flags** - Both `-f` and `--flag` syntax supported
 - **Required and optional flags** - Enforce required parameters
 - **Default values** - Sensible defaults for all flag types
