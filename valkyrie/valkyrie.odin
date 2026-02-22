@@ -73,6 +73,7 @@ Command :: struct {
 	persistent_post_run: Command_Fn,
 	help_fn:             Help_Fn,
 	parent:              ^Command,
+	respectful:          bool,
 	allocator:           mem.Allocator,
 }
 
@@ -113,12 +114,14 @@ command_create :: proc(
 	name: string,
 	description: string = "",
 	handler: Command_Fn = nil,
+	respectful: bool = true,
 	allocator := context.allocator,
 ) -> ^Command {
 	cmd := new(Command, allocator)
 	cmd.name = name
 	cmd.description = description
 	cmd.handler = handler
+	cmd.respectful = respectful
 	cmd.allocator = allocator
 	cmd.aliases = make([dynamic]string, allocator)
 	cmd.flags = make([dynamic]Flag, allocator)
@@ -689,7 +692,11 @@ app_run :: proc(app: ^App, args: []string = nil) -> int {
 
 	// Execute pre-run hook
 	if cmd.pre_run != nil {
-		if !cmd.pre_run(&ctx) {
+		if !execute_command_pre_run(cmd, &ctx) {
+			return 1
+		}
+	} else {
+		if !execute_command_pre_run(cmd.parent, &ctx) {
 			return 1
 		}
 	}
@@ -702,7 +709,11 @@ app_run :: proc(app: ^App, args: []string = nil) -> int {
 
 	// Execute post-run hook
 	if cmd.post_run != nil {
-		if !cmd.post_run(&ctx) {
+		if !execute_command_post_run(cmd, &ctx) {
+			return 1
+		}
+	} else {
+		if !execute_command_post_run(cmd.parent, &ctx) {
 			return 1
 		}
 	}
@@ -714,6 +725,44 @@ app_run :: proc(app: ^App, args: []string = nil) -> int {
 
 	return 0
 }
+
+// Execute command's pre-run hooks from root to leaf
+execute_command_pre_run :: proc(cmd: ^Command, ctx: ^Context) -> bool {
+	if cmd == nil do return true
+	// First execute parent's persistent pre-run
+	if cmd.respectful {
+		if !execute_command_pre_run(cmd.parent, ctx) {
+			return false
+		}
+	}
+	// Then execute this command's persistent pre-run
+	if cmd.pre_run != nil {
+		if !cmd.pre_run(ctx) {
+			return false
+		}
+	}
+	return true
+}
+
+// Execute command's post-run hooks from leaf to root
+execute_command_post_run :: proc(cmd: ^Command, ctx: ^Context) -> bool {
+	if cmd == nil do return true
+	// First execute this command's post-run
+	if cmd.post_run != nil {
+		if !cmd.post_run(ctx) {
+			return false
+		}
+	}
+	// Then execute parent's post-run
+	if cmd.respectful {
+		if !execute_command_post_run(cmd.parent, ctx) {
+			return false
+		}
+	}
+	return true
+}
+
+
 
 // Execute persistent pre-run hooks from root to leaf
 execute_persistent_pre_run :: proc(cmd: ^Command, ctx: ^Context) -> bool {
